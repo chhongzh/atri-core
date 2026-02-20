@@ -4,6 +4,7 @@ package atri
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/go-telegram/bot"
 	"github.com/openai/openai-go/v3"
@@ -13,9 +14,10 @@ import (
 
 // Config 用于配置Atri实例的模型、最大保留轮数和系统提示词
 type Config struct {
-	Model        string
-	MaxRounds    int
-	SystemPrompt string
+	Model            string
+	MaxRounds        int
+	SystemPrompt     string
+	CheckInitTimeout time.Duration
 }
 
 // Atri 是Atri的实例

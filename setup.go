@@ -7,6 +7,10 @@ func (a *Atri) setupBot() error {
 		bot.WithDefaultHandler(a.handlerForTextMessage),
 	}
 
+	if a.config.CheckInitTimeout != 0 {
+		opts = append(opts, bot.WithCheckInitTimeout(a.config.CheckInitTimeout))
+	}
+
 	bt, err := bot.New(a.botToken, opts...)
 	if err != nil {
 		return err
