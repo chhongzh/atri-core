@@ -7,10 +7,10 @@ import (
 	"github.com/openai/openai-go/v3"
 )
 
-type userChatHistroy = []openai.ChatCompletionMessageParamUnion
+type roundHistory = []openai.ChatCompletionMessageParamUnion
 type j = map[string]any
 type userSession struct {
 	currentRole string
-	histories   userChatHistroy
+	histories   []roundHistory
 }
 type commandHandlerFunc = func(context.Context, *bot.Bot, int64, int64, []string) error

@@ -23,9 +23,9 @@ func (a *Atri) handleAiChat(ctx context.Context, bt *bot.Bot, userID int64, user
 		return err
 	}
 
-	thisRoundStartAt := len(session.histories)
-	session.histories = append(
-		session.histories,
+	thisRound := roundHistory{}
+	thisRound = append(
+		thisRound,
 		a.buildTimeSystemMessage(),
 		a.buildUserMessage(chatText),
 	)
@@ -35,7 +35,13 @@ func (a *Atri) handleAiChat(ctx context.Context, bt *bot.Bot, userID int64, user
 
 	// 循环处理，直到没有工具调用
 	for {
-		fullContent, finishedToolCalls, err := a.processStreamResponse(ctx, bt, chatID, session.histories, systemPromptMessage)
+		allHistories := []openai.ChatCompletionMessageParamUnion{}
+		for _, round := range session.histories {
+			allHistories = append(allHistories, round...)
+		}
+		allHistories = append(allHistories, thisRound...)
+
+		fullContent, finishedToolCalls, err := a.processStreamResponse(ctx, bt, chatID, allHistories, systemPromptMessage)
 		if err != nil {
 			return err
 		}
@@ -59,36 +65,34 @@ func (a *Atri) handleAiChat(ctx context.Context, bt *bot.Bot, userID int64, user
 				}
 				assistantMsg.OfAssistant.ToolCalls = toolCallsParam
 			}
-			session.histories = append(session.histories, assistantMsg)
+			thisRound = append(thisRound, assistantMsg)
 
 			for _, toolCall := range finishedToolCalls {
 				res := a.handleToolCall(ctx, bt, userID, toolCall)
-				session.histories = append(session.histories, res)
+				thisRound = append(thisRound, res)
 			}
 			// 继续循环，将 Tool Call 的结果发给 AI
 			continue
 		}
 
 		// 没有工具调用，结束对话
-		session.histories = append(session.histories, assistantMsg)
+		thisRound = append(thisRound, assistantMsg)
 		break
 	}
 
 	// 保存历史
-	diffed := session.histories[thisRoundStartAt:]
-	err = a.writeHistoryToDB(ctx, diffed, userID)
+	err = a.writeHistoryToDB(ctx, thisRound, userID)
 	if err != nil {
 		return err
 	}
 
+	session.histories = append(session.histories, thisRound)
 	session.histories = a.trimHistoryToMaxRounds(session.histories)
 
 	a.logger.Info(
 		"会话完成",
 		zap.Int64("UserID", userID),
-		zap.Int("NewMessages", len(diffed)),
-		zap.Int("TotalMessages", len(session.histories)),
-		zap.Int("RoundsInMemory", countUserMessages(session.histories)),
+		zap.Int("TotalRounds", len(session.histories)),
 	)
 
 	return nil
@@ -98,26 +102,13 @@ func isUserMessage(msg openai.ChatCompletionMessageParamUnion) bool {
 	return msg.OfUser != nil
 }
 
-func (a *Atri) trimHistoryToMaxRounds(histories userChatHistroy) userChatHistroy {
+func (a *Atri) trimHistoryToMaxRounds(histories []roundHistory) []roundHistory {
 	max := a.config.MaxRounds
-	if max <= 0 {
+	if max <= 0 || len(histories) <= max {
 		return histories
 	}
-	rounds := 0
-	start := 0
-	for i := len(histories) - 1; i >= 0; i-- {
-		if isUserMessage(histories[i]) {
-			rounds++
-			if rounds == max {
-				start = i
-				break
-			}
-		}
-	}
-	if rounds < max {
-		return histories
-	}
-	return histories[start:]
+
+	return histories[len(histories)-max:]
 }
 
 // startTypingLoop 开启一个 goroutine 持续发送 Typing 状态，返回一个停止函数
@@ -175,7 +166,7 @@ func (a *Atri) processStreamResponse(
 	var finishedToolCalls []openai.FinishedChatCompletionToolCall
 
 	stream := a.openaiClient.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
-		Messages: append(userChatHistroy{systemPrompt}, histories...),
+		Messages: append([]openai.ChatCompletionMessageParamUnion{systemPrompt}, histories...),
 		Model:    a.config.Model,
 		Tools:    a.getTools(),
 	})

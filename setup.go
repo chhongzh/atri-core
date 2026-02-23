@@ -23,5 +23,5 @@ func (a *Atri) setupBot() error {
 }
 
 func (a *Atri) setupDB() error {
-	return a.db.AutoMigrate(&memoryRecord{}, &allowedUserRecord{}, &historyRecord{})
+	return a.db.AutoMigrate(&memoryRecord{}, &allowedUserRecord{}, &roundRecord{})
 }

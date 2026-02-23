@@ -20,7 +20,7 @@ type allowedUserRecord struct {
 	IsAdmin bool
 }
 
-type historyRecord struct {
+type roundRecord struct {
 	gorm.Model
 
 	UserID int64

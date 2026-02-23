@@ -46,14 +46,12 @@ func (a *Atri) handleInfo(ctx context.Context, bt *bot.Bot, chatID int64, userID
 
 当前内存中的轮数:%d
 配置的最大轮数:%s
-当前内存中的消息数量:%d
 数据库中的总消息数量:%d
 已经存储的记忆数量:%d
 模型:%s
 `
 	session := a.getSessionOrInit(ctx, userID)
-	roundsInMemory := countUserMessages(session.histories)
-	messagesInMemory := len(session.histories)
+	roundsInMemory := len(session.histories)
 
 	totalMessagesInDB, err := a.countHistoryInDB(ctx, userID)
 	if err != nil {
@@ -78,7 +76,6 @@ func (a *Atri) handleInfo(ctx context.Context, bt *bot.Bot, chatID int64, userID
 			msg,
 			roundsInMemory,
 			maxRoundsStr,
-			messagesInMemory,
 			totalMessagesInDB,
 			len(memories),
 			a.config.Model,

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/openai/openai-go/v3"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -88,7 +87,7 @@ func (a *Atri) isAdmin(ctx context.Context, userID int64) bool {
 
 func (a *Atri) countHistoryInDB(ctx context.Context, userID int64) (int64, error) {
 	var count int64
-	err := a.db.WithContext(ctx).Model(&historyRecord{}).Where("user_id = ?", userID).Count(&count).Error
+	err := a.db.WithContext(ctx).Model(&roundRecord{}).Where("user_id = ?", userID).Count(&count).Error
 	if err != nil {
 		return 0, err
 	}
@@ -134,104 +133,60 @@ func (a *Atri) deleteMemory(ctx context.Context, userID int64, memoryID uint) er
 
 func (a *Atri) fillSessionHistoryFromDB(ctx context.Context, session *userSession, userID int64) error {
 	maxRounds := a.config.MaxRounds
-	pageSize := 50
-	historiesDesc := userChatHistroy{}
-	rounds := 0
-	offset := 0
-	queries := 0
+	query := gorm.G[roundRecord](a.db).Where("user_id = ?", userID).Order("id DESC")
+	if maxRounds > 0 {
+		query = query.Limit(maxRounds)
+	}
+	roundsInDB, err := query.Find(ctx)
+	if err != nil {
+		return err
+	}
 
-	for {
-		historyRecords, err := gorm.G[historyRecord](a.db).
-			Where("user_id = ?", userID).
-			Order("id DESC").
-			Offset(offset).
-			Limit(pageSize).
-			Find(ctx)
+	res := []roundHistory{}
+	for _, round := range roundsInDB {
+		tmp := roundHistory{}
+
+		err = json.Unmarshal([]byte(round.InJSON), &tmp)
 		if err != nil {
 			return err
 		}
-		queries++
-		if len(historyRecords) == 0 {
-			break
-		}
 
-		offset += len(historyRecords)
-
-		for _, record := range historyRecords {
-			temp := openai.ChatCompletionMessageParamUnion{}
-			err := json.Unmarshal([]byte(record.InJSON), &temp)
-			if err != nil {
-				return err
-			}
-
-			historiesDesc = append(historiesDesc, temp)
-			if isUserMessage(temp) && maxRounds > 0 {
-				rounds++
-				if rounds >= maxRounds {
-					break
-				}
-			}
-		}
-
-		if maxRounds > 0 && rounds >= maxRounds {
-			break
-		}
+		res = append(res, tmp)
 	}
 
-	if len(historiesDesc) == 0 {
-		session.histories = userChatHistroy{}
-		return nil
-	}
-
-	slices.Reverse(historiesDesc)
-	session.histories = historiesDesc
+	slices.Reverse(res)
 
 	a.logger.Info(
 		"加载会话历史完成",
 		zap.Int64("UserID", userID),
-		zap.Int("Queries", queries),
-		zap.Int("LoadedMessages", len(historiesDesc)),
-		zap.Int("MaxRounds", a.config.MaxRounds),
-		zap.Int("RoundsInMemory", countUserMessages(historiesDesc)),
+		zap.Int("LoadedMessages", len(res)),
 	)
+
+	session.histories = res
 
 	return nil
 }
 
 // writeHistoryToDB 将新的历史记录写入数据库
-func (a *Atri) writeHistoryToDB(ctx context.Context, diffed userChatHistroy, userID int64) error {
-	err := a.db.Transaction(func(tx *gorm.DB) error {
-		for _, msg := range diffed {
-			inJSON, err := json.Marshal(msg)
-			if err != nil {
-				return err
-			}
-
-			err = gorm.G[historyRecord](tx).Create(ctx, &historyRecord{UserID: userID, InJSON: string(inJSON)})
-			if err != nil {
-				return err
-			}
-		}
-
+func (a *Atri) writeHistoryToDB(ctx context.Context, diffed roundHistory, userID int64) error {
+	if len(diffed) == 0 {
 		return nil
-	})
+	}
+
+	inJSON, err := json.Marshal(diffed)
 	if err != nil {
 		return err
 	}
+
+	err = gorm.G[roundRecord](a.db).Create(ctx, &roundRecord{UserID: userID, InJSON: string(inJSON)})
+	if err != nil {
+		return err
+	}
+
 	a.logger.Info(
 		"写入会话历史到数据库",
 		zap.Int64("UserID", userID),
 		zap.Int("Messages", len(diffed)),
 	)
 	return nil
-}
-
-func countUserMessages(histories userChatHistroy) int {
-	count := 0
-	for _, h := range histories {
-		if isUserMessage(h) {
-			count++
-		}
-	}
-	return count
 }
